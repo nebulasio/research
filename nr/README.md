@@ -1,6 +1,6 @@
 # Nebulas Rank
 
-***nr.scala*** is an implementation code of **Nebulas Rank** algorithm, which is described in <a href="https://nebulas.io/docs/NebulasTechnicalWhitepaper.pdf">Nebulas Technical Whitepaper</a>.
+***nr.scala*** is an implementation of **Nebulas Rank** algorithm, which is described in <a href="https://nebulas.io/docs/NebulasTechnicalWhitepaper.pdf">Nebulas Technical Whitepaper</a>.
 
 > **Note: Nebulas Rank algorithm** is being improved continuously.
 
@@ -15,7 +15,7 @@ Download <a href="https://spark.apache.org">Apache Spark</a>. Let ***$spark_home
 
 Let ***txs.txt*** be the input data file. Put it in your working directory, named as ***$wd***.
 
-You can download <a href="https://www.dropbox.com/s/7ludeg2eu2rf68i/2017July.txt.tar.bz2?dl=0">sample input</a>, which is **the Ethereum transaction set of July, 2017**. You can also extract the transactions from blockchain storage by yourself, with the same format.
+You can download <a href="https://www.dropbox.com/s/7ludeg2eu2rf68i/2017July.txt.tar.bz2?dl=0">sample input</a>, which is **the Ethereum transaction set of July, 2017**. You need to rename the extracted file to txs.txt. Or you can also extract the transactions from blockchain storage by yourself, using the same format.
 
 > Following is the format of ***txs.txt***:
 >
