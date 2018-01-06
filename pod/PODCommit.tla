@@ -57,8 +57,6 @@ Messages ==
   
 PODTypeOK == 
     /\ vrState \in [Validator -> {"working", "prepared", "committed", "finality"}]
-     /\ vrPrepared \in [Validator -> { Validator } ] 
-     /\ vrCommitted \in [Validator -> { Validator } ] 
      /\ vrFinal \in [Validator -> Validator \cup {"none"}] 
     /\ msgs \subseteq Messages
     
@@ -92,8 +90,7 @@ ValidatorPropose(r) ==
     /\ vrState[r] = "working"
     /\ vrState' = [vrState EXCEPT![r] = "prepared"]
     /\ vrPrepared' = [vrPrepared EXCEPT![r] = {[type |-> "prepare", ins |->r , acc |-> r]} ]
-    /\ Send([type |-> "propose", ins |->r, acc |-> r])
-    /\ Send([type |-> "prepare", ins |->r, acc |-> r])
+    /\ msgs' = msgs \cup {[type |-> "propose", ins |->r, acc |-> r],[type |-> "prepare", ins |->r, acc |-> r] }
     /\ UNCHANGED << vrCommitted, vrFinal >>
 
 ValidatorChooseToCommit == 
@@ -123,7 +120,7 @@ ValidatorChooseToFinal ==
             /\ vrFinal' = [vrFinal EXCEPT ![r] = v ]
        IN 
            \A r \in Validator, v \in Validator : ChooseToFinal(r, v)
-    /\ UNCHANGED << vrPrepared, vrCommitted >>
+    /\ UNCHANGED << vrPrepared, vrCommitted, msgs >>
     
 -----------------------------------------------------------------------------
 (***************************************************************************)
@@ -152,7 +149,7 @@ RecvPrepare(r, from, v) ==
         /\ m.acc = v
         /\ m.ins = from
     /\ vrPrepared' = [vrPrepared EXCEPT![r] = vrPrepared[r] \cup {[type |-> "prepare", ins |-> r, acc |-> v]} ]
-    /\ UNCHANGED <<vrCommitted, vrState, vrFinal >>
+    /\ UNCHANGED <<vrCommitted, vrState, vrFinal, msgs >>
     
 RecvVote(r, from, v) == 
     (***********************************************************************)
@@ -163,17 +160,17 @@ RecvVote(r, from, v) ==
         /\ m.type = "vote"
         /\ m.acc = v
         /\ m.ins = from
-    /\ vrCommitted' = [vrCommitted EXCEPT![r] = vrCommitted[r] \cup {[type |-> "prepare", ins |-> r, acc |-> v]} ]
-    /\ UNCHANGED <<vrPrepared, vrState >>
+    /\ vrCommitted' = [vrCommitted EXCEPT![r] = vrCommitted[r] \cup {[type |-> "vote", ins |-> r, acc |-> v]} ]
+    /\ UNCHANGED <<vrPrepared, vrState, msgs >>
     
 -----------------------------------------------------------------------------
 PODNext ==
-    \/ \E r \in Validator : ValidatorPropose(r)
-    \/ ValidatorChooseToCommit
-    \/ ValidatorChooseToFinal
-    \/ \E r, v \in Validator: RecvPropose(r, v)
-    \/ \E r, from, v \in Validator: \/ RecvPrepare(r, from, v)
-                                    \/ RecvVote(r, from, v)
+     \/ \E r \in Validator : ValidatorPropose(r)
+     \/ \E r, v \in Validator: RecvPropose(r, v) 
+     \/ ValidatorChooseToCommit  
+     \/ ValidatorChooseToFinal   
+     \/ \E r, from, v \in Validator: \/ RecvPrepare(r, from, v)  
+                                     \/ RecvVote(r, from, v)  
                                     
 \* -----------------------------------------------------------------------------
 (*PODConsistent ==  *)
@@ -196,5 +193,5 @@ PODSpec == PODInit /\ [][PODNext]_<<vrState, vrPrepared, vrCommitted, vrFinal>>
 \* THEOREM PODSpec => [] (PODTypeOK /\ PODConsistent)
 =============================================================================
 \* Modification History
-\* Last modified Sat Jan 06 20:12:31 CST 2018 by xuepeng
+\* Last modified Sat Jan 06 21:48:30 CST 2018 by xuepeng
 \* Created Wed Jan 03 23:52:11 CST 2018 by xuepeng
