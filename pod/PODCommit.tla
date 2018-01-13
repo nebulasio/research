@@ -13,6 +13,9 @@
 (*  - We don't consider the liveness problem. *)
 (*  - We don't consider normal nodes besides validators. *)
 (***************************************************************************)
+
+EXTENDS Naturals, TLC
+
 CONSTANT Validator, \* The set of validators
     Majority \* 1+ n * 2/3 validators
 
@@ -46,14 +49,14 @@ Messages ==
   (*************************************************************************)
   
   (* The set of all possible messages.  The ins field indicates the sender. For "propose" *)
-  (* message, the "ins" field means she propose a block. Since we do not mind the proposed value, we do not *)
-  (* record the proposed value here. The acc field indicates the sender of a message.   *)
+  (* message, the "val" field means she propose a block. Since we do not mind the proposed value, we do not *)
+  (* record the proposed value here. The "sender" field indicates the sender of a message.   *)
   (*************************************************************************)
-  [type : {"propose"}, ins : Validator, acc: Validator] 
+  [type : {"propose"}, val : Validator, sender: Validator] 
       \cup
-  [type : {"prepare"}, ins : Validator, acc : Validator] 
+  [type : {"prepare"}, val : Validator, sender : Validator] 
       \cup
-  [type : {"vote"}, ins : Validator, acc: Validator]
+  [type : {"vote"}, val : Validator, sender: Validator]
   
 PODTypeOK == 
     /\ vrState \in [Validator -> {"working", "prepared", "committed", "finality"}]
@@ -66,6 +69,7 @@ PODInit == \* The initial predicate
     /\ vrCommitted = [v \in Validator |-> {}]
     /\ vrFinal = [v \in Validator |-> "none"]
     /\ msgs = {}
+    /\ Print("init", TRUE)
     
 
 -----------------------------------------------------------------------------
@@ -77,8 +81,9 @@ Send(m) == msgs' = msgs \cup {m}
   (* An action expression that describes the sending of message m.         *)
   (*************************************************************************)
 
-PreparedSet(set, r) == {m \in set : m.acc = r}
-CommittedSet(set, r) == {m \in set : m.acc = r}
+PreparedSet(set, r) == {m \in set : m.val = r}
+CommittedSet(set, r) == {m \in set : m.val = r}
+
 -----------------------------------------------------------------------------
 (***************************************************************************)
 (*                               Validator ACTIONS                         *)
@@ -89,23 +94,25 @@ ValidatorPropose(r) ==
     (***********************************************************************)
     /\ vrState[r] = "working"
     /\ vrState' = [vrState EXCEPT![r] = "prepared"]
-    /\ vrPrepared' = [vrPrepared EXCEPT![r] = {[type |-> "prepare", ins |->r , acc |-> r]} ]
-    /\ msgs' = msgs \cup {[type |-> "propose", ins |->r, acc |-> r],[type |-> "prepare", ins |->r, acc |-> r] }
+    /\ vrPrepared' = [vrPrepared EXCEPT![r] = {[type |-> "prepare", val |->r , sender |-> r]} ]
+    /\ msgs' = msgs \cup {[type |-> "propose", val |->r, sender |-> r],
+                          [type |-> "prepare", val |->r, sender |-> r] }
     /\ UNCHANGED << vrCommitted, vrFinal >>
-
+    
+ChooseToCommit(r, v) ==
+            /\ LET Prepared == {m.sender: m \in PreparedSet(vrPrepared[r], v)}
+               IN /\ Prepared \in Majority 
+            /\ vrState[r] = "prepared"
+            /\ vrState' = [vrState EXCEPT ![r] = "committed"]
+            /\ vrCommitted' = [vrCommitted EXCEPT ![r]=vrCommitted[r] \cup 
+                    {[type |-> "vote", val |-> v, sender |-> r]}]
+            /\ Send([type |-> "vote", val |-> v, sender |-> r])
+            
 ValidatorChooseToCommit == 
     (***********************************************************************)
     (* Validator try to vote a block                                       *)
     (***********************************************************************)
-    /\ LET ChooseToCommit(r, v) ==
-            /\ LET Prepared == {m.ins: m \in PreparedSet(vrPrepared[r], v)}
-               IN Prepared \in Majority
-            /\ vrState[r] = "prepared"
-            /\ vrState' = [vrState EXCEPT ![r] = "committed"]
-            /\ vrCommitted' = [vrCommitted EXCEPT ![r]=vrCommitted[r] \cup {[type |-> "vote", ins |-> r, acc |-> v]}]
-            /\ Send([type |-> "vote", ins |-> r, acc |-> v])
-       IN 
-           \A r \in Validator, v \in Validator : ChooseToCommit(r, v)
+    /\ \E r, v \in Validator : ChooseToCommit(r, v)
     /\ UNCHANGED << vrPrepared, vrFinal >>
        
 ValidatorChooseToFinal == 
@@ -113,13 +120,13 @@ ValidatorChooseToFinal ==
     (* Validator try to final a block.                                       *)
     (***********************************************************************)
     /\ LET ChooseToFinal(r, v) ==
-            /\ LET Committed == {m.ins: m \in CommittedSet(vrCommitted[r], v)}
-               IN Committed \in Majority
+            /\ LET Committed == {m.sender: m \in CommittedSet(vrCommitted[r], v)}
+               IN  /\ Committed \in Majority
             /\ vrState[r] = "committed"
             /\ vrState' = [vrState EXCEPT ![r] = "finality"]
             /\ vrFinal' = [vrFinal EXCEPT ![r] = v ]
        IN 
-           \A r \in Validator, v \in Validator : ChooseToFinal(r, v)
+           \E r \in Validator, v \in Validator : ChooseToFinal(r, v)
     /\ UNCHANGED << vrPrepared, vrCommitted, msgs >>
     
 -----------------------------------------------------------------------------
@@ -133,10 +140,10 @@ RecvPropose(r, v) ==
     /\ vrState[r] = "working"
     /\ \E m \in msgs :
         /\ m.type = "propose"
-        /\ m.ins = v
+        /\ m.val = v
     /\ vrState' = [vrState EXCEPT ![r] = "prepared"]
-    /\ Send([type |-> "prepare", ins |-> r, acc |-> v])
-    /\ vrPrepared' = [vrPrepared EXCEPT![r] = {[type |-> "prepare", ins |-> r, acc |-> v]} ]
+    /\ Send([type |-> "prepare", val |-> v, sender |-> r])
+    /\ vrPrepared' = [vrPrepared EXCEPT![v] = {[type |-> "prepare", val |-> v, sender |-> r]} ]
     /\ UNCHANGED << vrCommitted, vrFinal >>
         
 RecvPrepare(r, from, v) == 
@@ -146,22 +153,36 @@ RecvPrepare(r, from, v) ==
     /\ vrState[r] = "prepared"
     /\ \E m \in msgs :
         /\ m.type = "prepare"
-        /\ m.acc = v
-        /\ m.ins = from
-    /\ vrPrepared' = [vrPrepared EXCEPT![r] = vrPrepared[r] \cup {[type |-> "prepare", ins |-> r, acc |-> v]} ]
+        /\ m.val = v
+        /\ m.sender = from
+    /\ vrPrepared' = [vrPrepared EXCEPT![r] = vrPrepared[r] \cup 
+                        {[type |-> "prepare", val |-> v, sender |-> from]} ]
     /\ UNCHANGED <<vrCommitted, vrState, vrFinal, msgs >>
     
 RecvVote(r, from, v) == 
     (***********************************************************************)
     (* The action when recv a vote message.                              *)
     (***********************************************************************)
-    /\ vrState[r] = "prepared"
+    (/\ vrState[r] = "prepared"
     /\ \E m \in msgs :
         /\ m.type = "vote"
-        /\ m.acc = v
-        /\ m.ins = from
-    /\ vrCommitted' = [vrCommitted EXCEPT![r] = vrCommitted[r] \cup {[type |-> "vote", ins |-> r, acc |-> v]} ]
-    /\ UNCHANGED <<vrPrepared, vrState, msgs >>
+        /\ m.val = v
+        /\ m.sender = from
+    /\ vrCommitted' = [vrCommitted EXCEPT![r] = vrCommitted[r] \cup 
+                       {[type |-> "vote", val |-> v, sender |-> from], 
+                        [type |-> "vote", val |-> v, sender |-> r]} ]
+    /\ vrState' = [vrState EXCEPT![r] = "committed"]
+    /\ Send([type |-> "vote", val |-> v, sender |-> r])
+    /\ UNCHANGED << vrPrepared, vrFinal >>)
+ \/ (/\ vrState[r] = "committed"
+    /\ \E m \in msgs :
+        /\ m.type = "vote"
+        /\ m.val = v
+        /\ m.sender = from
+    /\ vrCommitted' = [vrCommitted EXCEPT![r] = vrCommitted[r] \cup 
+                        {[type |-> "vote", val |-> v, sender |-> from]} ]
+    /\ UNCHANGED << vrPrepared, vrFinal, vrState, msgs >>)
+    
     
 -----------------------------------------------------------------------------
 PODNext ==
@@ -188,10 +209,10 @@ PODNext ==
                        
                        
 -----------------------------------------------------------------------------
-PODSpec == PODInit /\ [][PODNext]_<<vrState, vrPrepared, vrCommitted, vrFinal>>
+PODSpec == PODInit /\ [][PODNext]_<<vrState, vrPrepared, vrCommitted, vrFinal, msgs>>
 
 \* THEOREM PODSpec => [] (PODTypeOK /\ PODConsistent)
 =============================================================================
 \* Modification History
-\* Last modified Sat Jan 06 21:48:30 CST 2018 by xuepeng
+\* Last modified Sat Jan 13 19:20:32 CST 2018 by xuepeng
 \* Created Wed Jan 03 23:52:11 CST 2018 by xuepeng
